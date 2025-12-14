@@ -1,0 +1,10 @@
+# Data
+data/raw/
+data/interim/
+data/processed/
+
+# Models
+models/
+
+# Python
+__pycac
