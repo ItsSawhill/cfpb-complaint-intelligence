@@ -1,0 +1,31 @@
+paths:
+  raw_dir: "data/raw"
+  interim_dir: "data/interim"
+  processed_dir: "data/processed"
+
+ingest:
+  mode: "csv"   # "csv" or "api"
+  csv_path: "data/raw/complaints.csv"   # put your Kaggle/CFPB CSV here
+  api:
+    base_url: "https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1/"
+    page_size: 100
+    max_pages: 50   # safety cap
+
+cleaning:
+  text_col_candidates:
+    - "Consumer complaint narrative"
+    - "consumer_complaint_narrative"
+    - "complaint_what_happened"   # API variant
+  label_col_candidates:
+    - "Product"
+    - "product"
+
+  min_words: 30
+  keep_top_n_products: 15   # set null to keep all
+  drop_missing_narratives: true
+
+  date_col_candidates:
+    - "Date received"
+    - "date_received"
+  output_parquet: "complaints_clean.parquet"
+
