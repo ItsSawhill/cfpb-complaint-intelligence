@@ -1,0 +1,119 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{hyperref}
+
+\title{CFPB Complaint Intelligence System}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report summarizes an end-to-end complaint intelligence system for CFPB complaint narratives. The system combines multiclass complaint classification, binary high-risk prediction, calibrated probability scoring, explainability outputs, and triage-ready exports. The implementation is intended for regulatory triage workflows where ranking and interpretability matter alongside predictive performance.
+\end{abstract}
+
+\section{Introduction}
+Consumer complaint operations require practical tools for organizing large volumes of narrative text into actionable queues. This repository implements a workflow that classifies complaints by category, estimates high-risk status, calibrates the resulting risk score, and exports ranked complaints for analyst review.
+
+\section{Business Problem}
+The operational question is not only ``what kind of complaint is this?'' but also ``which complaints should be reviewed first, and why?'' A useful triage system must therefore support category prediction, calibrated prioritization, and transparent explanations that can be inspected by human reviewers.
+
+\section{Target Definition}
+The multiclass target is complaint \texttt{product}. The binary target is \texttt{high\_risk}, defined as:
+\begin{itemize}
+\item \texttt{Consumer disputed? = Yes}, or
+\item \texttt{Timely response? = No}, or
+\item \texttt{Tags} contains a vulnerable-consumer signal such as \texttt{Servicemember} or \texttt{Older American}.
+\end{itemize}
+This target is explicit, reproducible, and tied to observable complaint metadata.
+
+\section{Methodology}
+The workflow contains six stages:
+\begin{enumerate}
+\item ingestion of CFPB complaint data
+\item preprocessing and schema standardization
+\item multiclass complaint classification
+\item binary high-risk training and calibration
+\item explainability generation
+\item triage output construction
+\end{enumerate}
+
+\section{Model Comparison}
+The current repository includes one multiclass model and two binary-risk models.
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+Task & Model & Key Features & Role \\
+\midrule
+Multiclass & Logistic Regression & word TF-IDF & complaint category prediction \\
+Binary risk & Logistic Regression & word TF-IDF & baseline risk model \\
+Binary risk & Calibrated Linear SVM & word + char TF-IDF & advanced calibrated model \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Current available metrics from \texttt{outputs/metrics/} are shown below.
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+Task & Model & Metric & Value \\
+\midrule
+Multiclass & TF-IDF + Logistic Regression & Accuracy & 0.8996 \\
+Multiclass & TF-IDF + Logistic Regression & Macro F1 & 0.7829 \\
+Binary risk & TF-IDF + Logistic Regression & ROC-AUC & 0.7275 \\
+Binary risk & TF-IDF + Logistic Regression & Average Precision & 0.1917 \\
+Binary risk & TF-IDF + Logistic Regression & Brier & 0.1146 \\
+Binary risk & Calibrated Linear SVM & ROC-AUC & 0.6328 \\
+Binary risk & Calibrated Linear SVM & Average Precision & 0.1482 \\
+Binary risk & Calibrated Linear SVM & Brier & 0.0765 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The advanced binary model is the current champion by calibration quality, while the baseline logistic model shows stronger ranking metrics in the same run.
+
+\section{Calibrated Risk Score}
+The final risk score is a calibrated probability in the interval $[0, 1]$. The project uses this value as \texttt{risk\_probability\_ml} and \texttt{risk\_score\_ml}. A practical interpretation is:
+\begin{itemize}
+\item 0.00--0.39: low priority
+\item 0.40--0.69: medium priority
+\item 0.70--1.00: high priority
+\end{itemize}
+This calibrated score is preferred over the rule-only score when trained model artifacts are available.
+
+\section{Explainability}
+The explainability layer combines three components:
+\begin{itemize}
+\item target-definition reasons from complaint metadata
+\item rule-based reasons from keywords and structured signals
+\item model-term reasons from the linear baseline binary model
+\end{itemize}
+A representative explanation string from the generated outputs is:
+
+\begin{quote}
+\texttt{target: vulnerable consumer tag | rules: keywords: denied | model terms: navy, navy federal, loan, federal, we}
+\end{quote}
+
+\section{Triage Output}
+The primary triage artifact is \texttt{outputs/metrics/top\_priority\_complaints.csv}. It ranks complaints by calibrated risk score and then by classifier confidence. The aligned evaluation bundle currently contains:
+\begin{itemize}
+\item \texttt{multiclass\_predictions.parquet}: 1882 rows
+\item \texttt{risk\_scored.parquet}: 1882 rows
+\item \texttt{dashboard.parquet}: 1882 rows
+\end{itemize}
+This alignment ensures that downstream dashboard and triage views reference the same complaints.
+
+\section{Limitations}
+Several limitations remain. First, the binary target is operational rather than adjudicated ground truth. Second, the advanced binary champion is strongest on calibration but not on all ranking metrics. Third, explanation strings may still contain redacted tokens present in the source narratives. Finally, the polished output bundle is aligned to the current evaluation artifact set rather than a full-corpus production export.
+
+\section{Conclusion}
+The repository now supports a coherent complaint-intelligence workflow that is suitable for portfolio presentation and technical review. It connects classification, calibrated risk estimation, explainability, and triage output generation in a form that is easy to inspect on GitHub and credible for recruiter or reviewer evaluation.
+
+\end{document}

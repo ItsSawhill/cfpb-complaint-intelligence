@@ -1,139 +1,216 @@
 # CFPB Complaint Intelligence System
 
-This repository is an end-to-end complaint intelligence workflow for CFPB complaint narratives. It supports regulatory triage by predicting complaint category, estimating whether a complaint is high risk, generating a calibrated risk score from 0 to 1, and surfacing explainable reasons for prioritization.
+This repository presents an end-to-end complaint intelligence workflow for CFPB complaint narratives. It is designed for regulatory triage: classify the complaint category, estimate whether the complaint is high risk, assign a calibrated risk score from 0 to 1, explain the drivers of prioritization, and export a ranked triage list for analyst review.
 
 ## Business Problem
 
-Regulatory operations teams need a repeatable way to triage large volumes of complaint narratives. This system helps answer four questions:
+Consumer-finance complaint teams work with large volumes of unstructured narratives. A practical triage system needs to do more than label complaints: it should identify which complaints deserve immediate attention, provide a stable risk score, and explain why the complaint rose to the top of the queue.
 
-1. What complaint category is this?
-2. Is this complaint high risk or low risk?
-3. What calibrated probability should we use as the risk score?
-4. Why was this complaint marked as high priority?
+This project addresses that workflow by combining:
 
-## Current Training Pipeline
+- multiclass complaint categorization
+- binary high-risk prediction
+- calibrated probability scoring
+- explainable prioritization outputs
+- triage-ready artifact generation
 
-The pipeline lives in these modules:
+## System Purpose
 
-- `src/complaint_intel/modeling/train_classifier.py`: multiclass product classification
-- `src/complaint_intel/risk/high_risk.py`: explicit binary target definition
-- `src/complaint_intel/risk/train_risk_model.py`: binary-risk training, calibration, and evaluation
-- `src/complaint_intel/risk/score.py`: full-dataset scoring and explainability
-- `src/complaint_intel/app/build_dashboard_data.py`: dashboard-ready merge step
-- `src/complaint_intel/pipeline/train_system.py`: end-to-end orchestration
+The system is built to support a reviewer or regulatory analyst through the following sequence:
 
-## Target Definition
+1. ingest and clean CFPB complaint narratives
+2. classify complaint category
+3. estimate calibrated high-risk probability
+4. combine rule-based and model-based explanations
+5. export ranked complaints for triage and dashboard inspection
 
-The binary target is explicitly named `high_risk`.
+## Targets
 
-`high_risk = 1` when at least one of these observable regulatory triage signals is present:
+### Multiclass Target
+
+The multiclass task predicts complaint `product` from the cleaned CFPB dataset. In the current aligned run, the classifier operates on five retained product classes after label normalization and minimum-support filtering.
+
+### Binary `high_risk` Target
+
+The binary target is explicitly defined in [high_risk.py](src/complaint_intel/risk/high_risk.py):
+
+`high_risk = 1` when any of the following hold:
 
 - `Consumer disputed? = Yes`
 - `Timely response? = No`
-- `Tags` contains a vulnerable consumer segment such as `Servicemember` or `Older American`
+- `Tags` contains a vulnerable-consumer marker such as `Servicemember` or `Older American`
 
-The existing multiclass task remains in place and still predicts the complaint `product` label from the cleaned CFPB dataset.
+This gives the risk model a concrete operational target tied to observable complaint metadata rather than a vague notion of severity.
 
 ## Models
 
-### Multiclass Task
+### Multiclass Complaint Classifier
 
-- Baseline: TF-IDF + Logistic Regression
-- Output: predicted complaint product plus top-1 confidence
+- Model: TF-IDF + Logistic Regression
+- Output artifacts: `predicted_product`, `prediction_confidence`
+- Code path: [src/complaint_intel/modeling/train_classifier.py](src/complaint_intel/modeling/train_classifier.py)
 
-### Binary High-Risk Task
+### Binary High-Risk Models
 
-- Baseline: word TF-IDF + Logistic Regression
-- Advanced: word and character TF-IDF + calibrated Linear SVM
-- Champion selection prefers better calibration while retaining strong discrimination
+- Baseline: word-level TF-IDF + Logistic Regression
+- Advanced: word + character TF-IDF + calibrated Linear SVM
+- Champion selection: best binary model chosen from the current run using calibration quality, with Brier score as the primary criterion
+- Code path: [src/complaint_intel/risk/train_risk_model.py](src/complaint_intel/risk/train_risk_model.py)
 
-### Model Comparison
+## Calibrated Risk Score
 
-| Task | Model | Features | Output | Current role |
-| --- | --- | --- | --- | --- |
-| Multiclass category | Logistic Regression | Word TF-IDF | `predicted_product`, `prediction_confidence` | Baseline classifier kept in production path |
-| Binary risk | Logistic Regression | Word TF-IDF | `baseline_risk_probability` | Baseline, strongest discrimination in current sampled run |
-| Binary risk | Calibrated Linear SVM | Word + character TF-IDF | `advanced_risk_probability` | Advanced calibrated model, current champion by Brier score |
+The final risk score is a calibrated probability in `[0, 1]`.
 
-## Results
-
-Each training run writes machine-readable metrics so the reported results stay attached to the exact run that produced them.
-
-Saved multiclass outputs:
-
-- `outputs/metrics/multiclass_metrics.json`
-- `outputs/metrics/multiclass_metrics.txt`
-- `outputs/metrics/multiclass_predictions.parquet`
-- `outputs/figures/multiclass_confusion_matrix.png`
-
-Saved binary-risk outputs:
-
-- `outputs/metrics/binary_risk_metrics.json`
-- `outputs/metrics/binary_risk_metrics.csv`
-- `outputs/metrics/binary_risk_predictions.parquet`
-- `outputs/metrics/binary_risk_top_terms.csv`
-- `outputs/metrics/top_priority_complaints.csv`
-- `outputs/figures/binary_risk_roc_curve.png`
-- `outputs/figures/binary_risk_pr_curve.png`
-- `outputs/figures/binary_risk_calibration_curve.png`
-- `outputs/figures/binary_risk_top_terms.png`
-
-### Key Metrics From The Current Polished Run
-
-| Task | Model | Metric | Value |
-| --- | --- | --- | --- |
-| Multiclass category | TF-IDF + Logistic Regression | Accuracy | 0.8996 |
-| Multiclass category | TF-IDF + Logistic Regression | Macro F1 | 0.7829 |
-| Binary risk | TF-IDF + Logistic Regression | ROC-AUC | 0.7275 |
-| Binary risk | TF-IDF + Logistic Regression | Average Precision | 0.1917 |
-| Binary risk | TF-IDF + Logistic Regression | Brier | 0.1146 |
-| Binary risk | Calibrated Linear SVM | ROC-AUC | 0.6328 |
-| Binary risk | Calibrated Linear SVM | Average Precision | 0.1482 |
-| Binary risk | Calibrated Linear SVM | Brier | 0.0765 |
-
-## Risk Scoring
-
-The system produces three related risk outputs:
-
+- `risk_probability_ml` / `risk_score_ml`: final calibrated binary-model probability
 - `risk_score_rule`: rule-based score from structured signals and narrative keywords
-- `risk_probability_ml` / `risk_score_ml`: calibrated binary-model probability from 0.0 to 1.0
-- `risk_level_ml`: bucketed risk label derived from the calibrated score
+- `risk_level_ml`: bucketed view of the calibrated probability
 
-The dashboard prefers the calibrated ML score when model artifacts are available and falls back to the rule-based score otherwise.
+Interpretation used in the project:
 
-Practical interpretation:
+- `0.00-0.39`: low priority
+- `0.40-0.69`: medium priority
+- `0.70-1.00`: high priority
 
-- `0.00-0.39`: low triage priority
-- `0.40-0.69`: medium triage priority
-- `0.70-1.00`: high triage priority
+The dashboard and triage outputs prefer the calibrated ML score when model artifacts are available.
 
-The triage export in `outputs/metrics/top_priority_complaints.csv` ranks complaints by calibrated risk score first and model confidence second.
+## Explainability Approach
 
-## Explainability
+The system builds `risk_reasons_final` by combining three layers:
 
-High-priority explanations combine three layers:
+- target-definition reasons from complaint metadata
+- rule-based reasons from keywords and structured triggers
+- model-term reasons from the linear baseline binary model
 
-- target-definition reasons from observed CFPB fields
-- rule-based reasons from keyword and structured-signal scoring
-- model-term reasons from the linear baseline risk model
-
-These are assembled into `risk_reasons_final` in the scored output parquet.
-
-Example explanation string:
+Example explanation string from the current outputs:
 
 ```text
 target: vulnerable consumer tag | rules: keywords: denied | model terms: navy, navy federal, loan, federal, we
 ```
 
-That format makes it easy to distinguish:
+This makes it possible to separate:
 
-- what made the complaint high risk by definition
-- which rule-based triggers fired
-- which narrative terms pushed the model upward
+- why the complaint qualifies as high-risk by definition
+- which deterministic rules fired
+- which narrative terms drove the model score upward
 
-## Running The End-to-End System
+## Key Results
 
-Full pipeline:
+These values come directly from the aligned artifacts currently stored in `outputs/metrics/`.
+
+- Multiclass accuracy: `0.8996`
+- Multiclass macro F1: `0.7829`
+- Binary champion model: `advanced_calibrated_svm`
+- Aligned artifact row counts:
+  - `multiclass_predictions.parquet`: `1882`
+  - `risk_scored.parquet`: `1882`
+  - `dashboard.parquet`: `1882`
+
+### Model Comparison
+
+| Task | Model | Main metric snapshot | Notes |
+| --- | --- | --- | --- |
+| Multiclass category | TF-IDF + Logistic Regression | Accuracy `0.8996`, Macro F1 `0.7829` | Current complaint-category model |
+| Binary high risk | TF-IDF + Logistic Regression | ROC-AUC `0.7275`, AP `0.1917`, Brier `0.1146` | Better ranking metrics in current run |
+| Binary high risk | Calibrated Linear SVM | ROC-AUC `0.6328`, AP `0.1482`, Brier `0.0765` | Current champion by calibration quality |
+
+The binary result is worth reading carefully: the advanced model wins on calibration, while the baseline logistic model is stronger on ROC-AUC and average precision in the current sampled run.
+
+## System Pipeline
+
+The project pipeline is:
+
+1. `Ingest`
+   Read raw CFPB complaints from CSV or API into intermediate parquet.
+
+2. `Preprocess`
+   Clean narrative text, standardize schema, normalize date fields, and retain downstream modeling columns.
+
+3. `Classify`
+   Train the multiclass TF-IDF + Logistic Regression model and write complaint-category predictions.
+
+4. `Risk Score`
+   Train binary high-risk models, calibrate the final probability, and select the champion model.
+
+5. `Explain`
+   Generate rule-based reasons, target-definition reasons, and model-term explanations.
+
+6. `Triage Output`
+   Merge aligned artifacts into dashboard data and export ranked complaints for analyst review.
+
+## Output Artifacts
+
+The primary generated outputs live in:
+
+- `outputs/metrics/`
+- `outputs/figures/`
+
+Important metric and table artifacts:
+
+- `outputs/metrics/multiclass_metrics.json`
+- `outputs/metrics/multiclass_metrics.txt`
+- `outputs/metrics/multiclass_predictions.parquet`
+- `outputs/metrics/binary_risk_metrics.json`
+- `outputs/metrics/binary_risk_metrics.csv`
+- `outputs/metrics/binary_risk_predictions.parquet`
+- `outputs/metrics/binary_risk_top_terms.csv`
+- `outputs/metrics/risk_scored.parquet`
+- `outputs/metrics/top_priority_complaints.csv`
+
+Important figure artifacts:
+
+- `outputs/figures/multiclass_confusion_matrix.png`
+- `outputs/figures/binary_risk_roc_curve.png`
+- `outputs/figures/binary_risk_pr_curve.png`
+- `outputs/figures/binary_risk_calibration_curve.png`
+- `outputs/figures/binary_risk_top_terms.png`
+
+Legacy files still exist under `reports/metrics/`, but the polished presentation artifacts for this version of the project are the files under `outputs/`.
+
+## Triage Workflow
+
+A practical triage workflow for this repository is:
+
+1. run the pipeline and generate aligned prediction artifacts
+2. inspect `outputs/metrics/top_priority_complaints.csv`
+3. review the corresponding rows in `data/processed/dashboard.parquet`
+4. use `risk_score_final`, `predicted_high_risk`, and `risk_reasons_final` to prioritize analyst review
+
+The triage CSV is sorted by:
+
+1. highest calibrated risk score
+2. highest classifier confidence
+
+## Triage Output Example
+
+The current generated triage file is [outputs/metrics/top_priority_complaints.csv](outputs/metrics/top_priority_complaints.csv). The first few rows show the intended output shape:
+
+| complaint_id | predicted_product | risk_score_final | risk_level_final | example reason |
+| --- | --- | --- | --- | --- |
+| `9904025` | `Credit card` | `0.6368` | `Medium` | `target: vulnerable consumer tag | rules: keywords: refused | model terms: military, wife, xxxx, close the, the account` |
+| `8000818` | `Mortgage` | `0.5681` | `Medium` | `target: vulnerable consumer tag | rules: keywords: denied | model terms: navy, navy federal, loan, federal, we` |
+| `6550762` | `Credit card` | `0.5005` | `Medium` | `target: no target risk signals | rules: no strong signals | model terms: plus, 00, barclay, xxxx, interest` |
+
+These examples are drawn directly from the generated output and intentionally use the redacted complaint text already present in the CFPB-derived data.
+
+## Repository Map
+
+Core code paths:
+
+- [src/complaint_intel/data/](src/complaint_intel/data/)
+- [src/complaint_intel/modeling/](src/complaint_intel/modeling/)
+- [src/complaint_intel/risk/](src/complaint_intel/risk/)
+- [src/complaint_intel/app/](src/complaint_intel/app/)
+- [src/complaint_intel/pipeline/](src/complaint_intel/pipeline/)
+
+Presentation and outputs:
+
+- [outputs/metrics/](outputs/metrics/)
+- [outputs/figures/](outputs/figures/)
+- [reports/](reports/)
+
+## How To Run
+
+Run the end-to-end workflow:
 
 ```bash
 PYTHONPATH=src ./.venv/bin/python -m complaint_intel.pipeline.train_system \
@@ -141,7 +218,7 @@ PYTHONPATH=src ./.venv/bin/python -m complaint_intel.pipeline.train_system \
   --split-date 2023-01-01
 ```
 
-Faster smoke run:
+Run a faster smoke version:
 
 ```bash
 PYTHONPATH=src ./.venv/bin/python -m complaint_intel.pipeline.train_system \
@@ -152,8 +229,14 @@ PYTHONPATH=src ./.venv/bin/python -m complaint_intel.pipeline.train_system \
   --max-score-rows 5000
 ```
 
-Launch the dashboard after training:
+Launch the Streamlit dashboard:
 
 ```bash
 PYTHONPATH=src ./.venv/bin/streamlit run src/complaint_intel/app/streamlit_app.py
 ```
+
+## Notes For Reviewers
+
+- All headline metrics in this README are taken from the current generated files under `outputs/metrics/`.
+- The aligned triage bundle is intentionally evaluation-focused: `multiclass_predictions.parquet`, `risk_scored.parquet`, and `dashboard.parquet` all contain `1882` rows from the same aligned set.
+- If a recruiter or reviewer wants one file to inspect first, start with `outputs/metrics/top_priority_complaints.csv`.

@@ -3,6 +3,9 @@ data/raw/
 data/interim/
 data/processed/
 reports/
+!reports/
+reports/*
+!reports/*.tex
 data/
 # Models
 models/
