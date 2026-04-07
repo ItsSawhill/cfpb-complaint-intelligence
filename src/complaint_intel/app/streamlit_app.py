@@ -50,7 +50,7 @@ def main():
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Complaints", f"{len(df):,}")
     if "risk_score_final" in df.columns:
-        c2.metric("Avg risk score", f"{df['risk_score_final'].dropna().mean():.1f}")
+        c2.metric("Avg risk score", f"{df['risk_score_final'].dropna().mean():.3f}")
     if "prediction_confidence" in df.columns:
         c3.metric("Avg confidence", f"{df['prediction_confidence'].dropna().mean():.3f}")
     if "risk_level_final" in df.columns:
@@ -110,7 +110,9 @@ def main():
 
     st.write("**Predicted product:**", row.get("predicted_product"))
     st.write("**Confidence:**", row.get("prediction_confidence"))
-    st.write("**Risk score:**", row.get("risk_score_final"), "-", row.get("risk_level_final"))
+    risk_score = row.get("risk_score_final")
+    risk_score_display = f"{risk_score:.3f}" if pd.notna(risk_score) else "NA"
+    st.write("**Risk score:**", risk_score_display, "-", row.get("risk_level_final"))
     st.write("**Risk reasons:**", row.get("risk_reasons_final"))
     st.write("**Narrative:**")
     st.write(row.get("narrative", ""))

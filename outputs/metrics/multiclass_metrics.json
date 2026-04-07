@@ -1,0 +1,8 @@
+{
+  "split_date": "2023-01-01",
+  "train_size": 7103,
+  "test_size": 1882,
+  "accuracy": 0.8995749202975558,
+  "macro_f1": 0.7829175259146277,
+  "num_classes": 5
+}

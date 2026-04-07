@@ -1,0 +1,31 @@
+{
+  "split_date": "2023-01-01",
+  "train_size": 8000,
+  "test_size": 2000,
+  "target_prevalence_train": 0.189625,
+  "target_prevalence_test": 0.0755,
+  "target_definition": "high_risk = disputed OR untimely response OR vulnerable consumer tag",
+  "champion_model": "advanced_calibrated_svm",
+  "models": {
+    "baseline_logreg": {
+      "roc_auc": 0.7274703705958832,
+      "average_precision": 0.19173722601212145,
+      "brier": 0.11463109191070404,
+      "log_loss": 0.38514290211982166,
+      "precision_at_0_5": 0.20540540540540542,
+      "recall_at_0_5": 0.25165562913907286,
+      "f1_at_0_5": 0.2261904761904762,
+      "positive_rate": 0.0755
+    },
+    "advanced_calibrated_svm": {
+      "roc_auc": 0.6327547734769823,
+      "average_precision": 0.14818638953330304,
+      "brier": 0.07649396446352627,
+      "log_loss": 0.2936863905437487,
+      "precision_at_0_5": 0.6666666666666666,
+      "recall_at_0_5": 0.013245033112582781,
+      "f1_at_0_5": 0.025974025974025976,
+      "positive_rate": 0.0755
+    }
+  }
+}

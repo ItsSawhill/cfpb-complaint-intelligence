@@ -1,161 +1,159 @@
-# 🧠 CFPB Complaint Intelligence System
+# CFPB Complaint Intelligence System
 
-## 📌 Overview
+This repository is an end-to-end complaint intelligence workflow for CFPB complaint narratives. It supports regulatory triage by predicting complaint category, estimating whether a complaint is high risk, generating a calibrated risk score from 0 to 1, and surfacing explainable reasons for prioritization.
 
-This project builds an **end-to-end NLP pipeline** for analyzing CFPB consumer complaint narratives and transforming them into **actionable risk signals**.
+## Business Problem
 
-The system performs:
-- Complaint classification
-- Risk-based prioritization
-- Explainable predictions
+Regulatory operations teams need a repeatable way to triage large volumes of complaint narratives. This system helps answer four questions:
 
-👉 Goal: help financial institutions and regulators **identify high-risk complaints early and allocate resources efficiently**
+1. What complaint category is this?
+2. Is this complaint high risk or low risk?
+3. What calibrated probability should we use as the risk score?
+4. Why was this complaint marked as high priority?
 
----
+## Current Training Pipeline
 
-## 🎯 Business Problem
+The pipeline lives in these modules:
 
-Financial institutions receive thousands of complaints daily.
+- `src/complaint_intel/modeling/train_classifier.py`: multiclass product classification
+- `src/complaint_intel/risk/high_risk.py`: explicit binary target definition
+- `src/complaint_intel/risk/train_risk_model.py`: binary-risk training, calibration, and evaluation
+- `src/complaint_intel/risk/score.py`: full-dataset scoring and explainability
+- `src/complaint_intel/app/build_dashboard_data.py`: dashboard-ready merge step
+- `src/complaint_intel/pipeline/train_system.py`: end-to-end orchestration
 
-Challenges:
-- Large volume of unstructured text
-- Hard to identify urgent/high-risk complaints
-- Limited explainability for decision-making
+## Target Definition
 
-This project solves:
+The binary target is explicitly named `high_risk`.
 
-> **Which complaints should be prioritized for immediate attention and why?**
+`high_risk = 1` when at least one of these observable regulatory triage signals is present:
 
----
+- `Consumer disputed? = Yes`
+- `Timely response? = No`
+- `Tags` contains a vulnerable consumer segment such as `Servicemember` or `Older American`
 
-## 🧠 System Design
+The existing multiclass task remains in place and still predicts the complaint `product` label from the cleaned CFPB dataset.
 
-Pipeline:
-
-1. Data ingestion (CFPB dataset)
-2. Text preprocessing
-3. Feature extraction (TF-IDF / embeddings)
-4. Model training
-5. Risk scoring (calibrated probabilities)
-6. Explainability layer
-7. Triage output generation
-
----
-
-## 📊 Dataset
-
-- Source: CFPB Consumer Complaint Database
-- Type: Unstructured complaint narratives
-- Target Variables:
-  - Complaint category (multiclass)
-  - Complaint severity (binary: high vs low risk)
-
----
-
-## 🧪 Modeling Approach
-
-### 🔹 Baseline Model
-- TF-IDF + Logistic Regression
-
-### 🔹 Advanced Model
-- Sentence embeddings + Gradient Boosting / XGBoost
-
-### 🔹 Outputs
-- Classification label
-- Probability score
-- Calibrated risk score
-
----
-
-## 🎯 Target Definition
+## Models
 
 ### Multiclass Task
-- Predict complaint category / issue
 
-### Binary Task (Critical)
-- High Risk (urgent regulatory concern)
-- Low Risk (standard complaint)
+- Baseline: TF-IDF + Logistic Regression
+- Output: predicted complaint product plus top-1 confidence
 
----
+### Binary High-Risk Task
 
-## 📈 Evaluation Metrics
+- Baseline: word TF-IDF + Logistic Regression
+- Advanced: word and character TF-IDF + calibrated Linear SVM
+- Champion selection prefers better calibration while retaining strong discrimination
 
-- Accuracy
-- Macro F1 Score
-- Precision / Recall (High-Risk class)
-- ROC-AUC
-- PR-AUC (for imbalance)
-- Calibration curves
+### Model Comparison
 
----
+| Task | Model | Features | Output | Current role |
+| --- | --- | --- | --- | --- |
+| Multiclass category | Logistic Regression | Word TF-IDF | `predicted_product`, `prediction_confidence` | Baseline classifier kept in production path |
+| Binary risk | Logistic Regression | Word TF-IDF | `baseline_risk_probability` | Baseline, strongest discrimination in current sampled run |
+| Binary risk | Calibrated Linear SVM | Word + character TF-IDF | `advanced_risk_probability` | Advanced calibrated model, current champion by Brier score |
 
-## 📊 Results (Example)
+## Results
 
-| Model | ROC-AUC | F1 Score | Precision (High Risk) |
-|------|--------|----------|-----------------------|
-| Logistic Regression | ~0.78 | 0.72 | 0.70 |
-| Advanced Model | 🔥 ~0.85 | 🔥 0.79 | 🔥 0.77 |
+Each training run writes machine-readable metrics so the reported results stay attached to the exact run that produced them.
 
----
+Saved multiclass outputs:
 
-## ⚡ Risk Scoring
+- `outputs/metrics/multiclass_metrics.json`
+- `outputs/metrics/multiclass_metrics.txt`
+- `outputs/metrics/multiclass_predictions.parquet`
+- `outputs/figures/multiclass_confusion_matrix.png`
 
-The system outputs a **priority score (0–1)**:
+Saved binary-risk outputs:
 
-- 0.0 → Low priority
-- 1.0 → High priority
+- `outputs/metrics/binary_risk_metrics.json`
+- `outputs/metrics/binary_risk_metrics.csv`
+- `outputs/metrics/binary_risk_predictions.parquet`
+- `outputs/metrics/binary_risk_top_terms.csv`
+- `outputs/metrics/top_priority_complaints.csv`
+- `outputs/figures/binary_risk_roc_curve.png`
+- `outputs/figures/binary_risk_pr_curve.png`
+- `outputs/figures/binary_risk_calibration_curve.png`
+- `outputs/figures/binary_risk_top_terms.png`
 
-This is based on:
-- predicted probability
-- calibrated confidence
+### Key Metrics From The Current Polished Run
 
----
+| Task | Model | Metric | Value |
+| --- | --- | --- | --- |
+| Multiclass category | TF-IDF + Logistic Regression | Accuracy | 0.8996 |
+| Multiclass category | TF-IDF + Logistic Regression | Macro F1 | 0.7829 |
+| Binary risk | TF-IDF + Logistic Regression | ROC-AUC | 0.7275 |
+| Binary risk | TF-IDF + Logistic Regression | Average Precision | 0.1917 |
+| Binary risk | TF-IDF + Logistic Regression | Brier | 0.1146 |
+| Binary risk | Calibrated Linear SVM | ROC-AUC | 0.6328 |
+| Binary risk | Calibrated Linear SVM | Average Precision | 0.1482 |
+| Binary risk | Calibrated Linear SVM | Brier | 0.0765 |
 
-## 🔍 Explainability
+## Risk Scoring
 
-We use:
-- SHAP values
-- Top contributing words/phrases
+The system produces three related risk outputs:
 
-Example:
+- `risk_score_rule`: rule-based score from structured signals and narrative keywords
+- `risk_probability_ml` / `risk_score_ml`: calibrated binary-model probability from 0.0 to 1.0
+- `risk_level_ml`: bucketed risk label derived from the calibrated score
 
-Complaint:
-> "Bank charged unauthorized fees repeatedly"
+The dashboard prefers the calibrated ML score when model artifacts are available and falls back to the rule-based score otherwise.
 
-Prediction:
-- Risk: High (0.87)
-- Key drivers:
-  - "unauthorized"
-  - "fees"
-  - "charged"
+Practical interpretation:
 
----
+- `0.00-0.39`: low triage priority
+- `0.40-0.69`: medium triage priority
+- `0.70-1.00`: high triage priority
 
-## 📊 Outputs
+The triage export in `outputs/metrics/top_priority_complaints.csv` ranks complaints by calibrated risk score first and model confidence second.
 
-### Figures
-- Confusion matrix
-- ROC curve
-- Precision-Recall curve
-- Feature importance
-- Complaint distribution
+## Explainability
 
-### Metrics
-- Model evaluation CSVs
-- Risk score distributions
+High-priority explanations combine three layers:
 
----
+- target-definition reasons from observed CFPB fields
+- rule-based reasons from keyword and structured-signal scoring
+- model-term reasons from the linear baseline risk model
 
-## 📦 Triage Output (FINAL PRODUCT)
+These are assembled into `risk_reasons_final` in the scored output parquet.
 
-Example output:
+Example explanation string:
 
-| Complaint ID | Category | Risk Score | Priority |
-|-------------|---------|------------|---------|
-| 12345 | Credit Card | 0.91 | 🔴 High |
-| 12346 | Mortgage | 0.42 | 🟡 Medium |
-| 12347 | Loan | 0.12 | 🟢 Low |
+```text
+target: vulnerable consumer tag | rules: keywords: denied | model terms: navy, navy federal, loan, federal, we
+```
 
----
+That format makes it easy to distinguish:
 
-## 📁 Project Structure
+- what made the complaint high risk by definition
+- which rule-based triggers fired
+- which narrative terms pushed the model upward
+
+## Running The End-to-End System
+
+Full pipeline:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python -m complaint_intel.pipeline.train_system \
+  --data data/processed/complaints_clean.parquet \
+  --split-date 2023-01-01
+```
+
+Faster smoke run:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python -m complaint_intel.pipeline.train_system \
+  --data data/processed/complaints_clean.parquet \
+  --split-date 2023-01-01 \
+  --max-train-rows 20000 \
+  --max-test-rows 5000 \
+  --max-score-rows 5000
+```
+
+Launch the dashboard after training:
+
+```bash
+PYTHONPATH=src ./.venv/bin/streamlit run src/complaint_intel/app/streamlit_app.py
+```

@@ -1,0 +1,14 @@
+Accuracy: 0.899575
+MacroF1: 0.782918
+
+                             precision    recall  f1-score   support
+
+Checking or savings account     0.9425    0.8283    0.8817        99
+                Credit card     0.7262    0.7262    0.7262        84
+           Credit reporting     0.9426    0.9508    0.9467      1504
+            Debt collection     0.5987    0.5697    0.5839       165
+                   Mortgage     0.7027    0.8667    0.7761        30
+
+                   accuracy                         0.8996      1882
+                  macro avg     0.7826    0.7883    0.7829      1882
+               weighted avg     0.8990    0.8996    0.8989      1882

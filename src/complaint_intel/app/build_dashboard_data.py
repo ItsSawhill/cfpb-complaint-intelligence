@@ -38,6 +38,9 @@ def main(
         "risk_probability_ml",
         "risk_score_ml",
         "risk_level_ml",
+        "predicted_high_risk",
+        "risk_reasons_model",
+        "risk_reasons_final",
     ]
     keep_risk = [c for c in keep_risk if c in risk.columns]
     risk_small = risk[keep_risk].copy()
@@ -55,7 +58,7 @@ def main(
     if "risk_score_ml" in dash.columns:
         dash["risk_score_final"] = dash["risk_score_ml"]
         dash["risk_level_final"] = dash["risk_level_ml"]
-        dash["risk_reasons_final"] = dash.get("risk_reasons_rule")
+        dash["risk_reasons_final"] = dash.get("risk_reasons_final", dash.get("risk_reasons_rule"))
         # fallback if ML is NA
         mask = dash["risk_score_final"].isna()
         dash.loc[mask, "risk_score_final"] = dash.loc[mask, "risk_score_rule"]
@@ -79,8 +82,8 @@ def main(
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--risk", default="reports/metrics/risk_scored.parquet")
-    p.add_argument("--preds", default="reports/metrics/test_predictions.parquet")
+    p.add_argument("--risk", default="outputs/metrics/risk_scored.parquet")
+    p.add_argument("--preds", default="outputs/metrics/multiclass_predictions.parquet")
     p.add_argument("--out", default="data/processed/dashboard.parquet")
     args = p.parse_args()
 

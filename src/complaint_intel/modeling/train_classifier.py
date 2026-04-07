@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Tuple
@@ -36,7 +37,8 @@ PRODUCT_MAP: Dict[str, str] = {
 class TrainConfig:
     data_path: Path
     models_dir: Path
-    reports_dir: Path
+    metrics_dir: Path
+    figures_dir: Path
     split_date: str  # e.g., "2023-01-01"
     text_col: str = "narrative"
     label_col: str = "product"
@@ -46,6 +48,8 @@ class TrainConfig:
     max_features: int | None = 200_000
     C: float = 4.0
     max_iter: int = 2000
+    max_train_rows: int | None = None
+    max_test_rows: int | None = None
 
 
 def normalize_labels(df: pd.DataFrame, label_col: str) -> pd.DataFrame:
@@ -60,6 +64,12 @@ def time_split(df: pd.DataFrame, date_col: str, split_date: str) -> Tuple[pd.Dat
     train_df = df[df[date_col] < split_ts].copy()
     test_df = df[df[date_col] >= split_ts].copy()
     return train_df, test_df
+
+
+def sample_rows(df: pd.DataFrame, max_rows: int | None) -> pd.DataFrame:
+    if max_rows is None or len(df) <= max_rows:
+        return df
+    return df.sample(n=max_rows, random_state=42)
 
 
 def plot_and_save_confusion_matrix(y_true, y_pred, labels, out_path: Path, title: str) -> None:
@@ -78,7 +88,8 @@ def plot_and_save_confusion_matrix(y_true, y_pred, labels, out_path: Path, title
 
 def main(cfg: TrainConfig) -> None:
     cfg.models_dir.mkdir(parents=True, exist_ok=True)
-    cfg.reports_dir.mkdir(parents=True, exist_ok=True)
+    cfg.metrics_dir.mkdir(parents=True, exist_ok=True)
+    cfg.figures_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_parquet(cfg.data_path)
 
@@ -97,6 +108,8 @@ def main(cfg: TrainConfig) -> None:
 
     # Time split
     train_df, test_df = time_split(df, cfg.date_col, cfg.split_date)
+    train_df = sample_rows(train_df, cfg.max_train_rows)
+    test_df = sample_rows(test_df, cfg.max_test_rows)
     if len(train_df) == 0 or len(test_df) == 0:
         raise ValueError(
             f"Time split produced empty set. "
@@ -109,9 +122,13 @@ def main(cfg: TrainConfig) -> None:
     y_test = test_df[cfg.label_col].astype("string")
 
     # Filter rare classes in TRAIN to avoid unstable classes
-    min_train_samples = 2000  # tune: 500, 1000, 2000
+    min_train_samples = 2000
+    if cfg.max_train_rows is not None:
+        min_train_samples = max(20, min(2000, cfg.max_train_rows // 20))
     vc = y_train.value_counts()
     keep = vc[vc >= min_train_samples].index
+    if len(keep) == 0:
+        keep = vc.index[: min(5, len(vc))]
     train_df = train_df[train_df[cfg.label_col].isin(keep)].copy()
     test_df = test_df[test_df[cfg.label_col].isin(keep)].copy()
 
@@ -159,15 +176,29 @@ def main(cfg: TrainConfig) -> None:
     print(report_txt)
 
     # Save metrics
-    metrics_path = cfg.reports_dir / "classifier_metrics.txt"
+    labels = sorted(y_test.unique().tolist())
+    metrics_path = cfg.metrics_dir / "multiclass_metrics.txt"
     metrics_path.write_text(
         f"Accuracy: {acc:.6f}\nMacroF1: {macro_f1:.6f}\n\n{report_txt}",
         encoding="utf-8",
     )
+    (cfg.metrics_dir / "multiclass_metrics.json").write_text(
+        json.dumps(
+            {
+                "split_date": cfg.split_date,
+                "train_size": int(len(train_df)),
+                "test_size": int(len(test_df)),
+                "accuracy": float(acc),
+                "macro_f1": float(macro_f1),
+                "num_classes": int(len(labels)),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     # Save confusion matrix (labels in sorted order)
-    labels = sorted(y_test.unique().tolist())
-    cm_path = cfg.reports_dir / "confusion_matrix.png"
+    cm_path = cfg.figures_dir / "multiclass_confusion_matrix.png"
     plot_and_save_confusion_matrix(y_test, pred, labels, cm_path, title="Confusion Matrix (Test)")
 
     # Save artifacts
@@ -179,7 +210,7 @@ def main(cfg: TrainConfig) -> None:
     pred_df["true_product"] = y_test.values
     pred_df["predicted_product"] = pred
     pred_df["prediction_confidence"] = conf
-    pred_out = cfg.reports_dir / "test_predictions.parquet"
+    pred_out = cfg.metrics_dir / "multiclass_predictions.parquet"
     pred_df.to_parquet(pred_out, index=False)
 
     print(f"\n[OK] Saved metrics -> {metrics_path}")
@@ -193,24 +224,30 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--data", default="data/processed/complaints_clean.parquet")
     p.add_argument("--models-dir", default="models/classifier")
-    p.add_argument("--reports-dir", default="reports/metrics")
+    p.add_argument("--metrics-dir", default="outputs/metrics")
+    p.add_argument("--figures-dir", default="outputs/figures")
     p.add_argument("--split-date", default="2023-01-01", help="Time split boundary (YYYY-MM-DD).")
     p.add_argument("--min-df", type=int, default=5)
     p.add_argument("--ngram-max", type=int, default=2)
     p.add_argument("--max-features", type=int, default=200_000)
     p.add_argument("--C", type=float, default=4.0)
     p.add_argument("--max-iter", type=int, default=2000)
+    p.add_argument("--max-train-rows", type=int, default=None)
+    p.add_argument("--max-test-rows", type=int, default=None)
     args = p.parse_args()
 
     cfg = TrainConfig(
         data_path=Path(args.data),
         models_dir=Path(args.models_dir),
-        reports_dir=Path(args.reports_dir),
+        metrics_dir=Path(args.metrics_dir),
+        figures_dir=Path(args.figures_dir),
         split_date=args.split_date,
         min_df=args.min_df,
         ngram_max=args.ngram_max,
         max_features=args.max_features,
         C=args.C,
         max_iter=args.max_iter,
+        max_train_rows=args.max_train_rows,
+        max_test_rows=args.max_test_rows,
     )
     main(cfg)
