@@ -11,6 +11,54 @@ from tqdm import tqdm
 from complaint_intel.utils.io import load_yaml, resolve_paths
 
 
+def _extract_api_records(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
+    """
+    Accept a few common CFPB-style response shapes and return a flat records list.
+    """
+    for key in ("hits", "results", "records", "data"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            for nested_key in ("hits", "results", "records"):
+                nested_value = value.get(nested_key)
+                if isinstance(nested_value, list):
+                    return nested_value
+    return []
+
+
+def ingest_from_api(
+    base_url: str,
+    page_size: int = 100,
+    max_pages: int = 50,
+    timeout: int = 30,
+) -> pd.DataFrame:
+    """
+    Fetch complaints from the CFPB API using simple page/size pagination.
+    """
+    session = requests.Session()
+    rows: list[Dict[str, Any]] = []
+
+    for page in tqdm(range(max_pages), desc="Fetching API pages"):
+        params = {"size": page_size, "page": page}
+        response = session.get(base_url, params=params, timeout=timeout)
+        response.raise_for_status()
+
+        payload = response.json()
+        batch = _extract_api_records(payload)
+        if not batch:
+            break
+
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+
+    if not rows:
+        raise ValueError(f"No complaint records returned from API: {base_url}")
+
+    return pd.DataFrame(rows)
+
+
 def ingest_from_csv(
     csv_path: str | Path,
     sample_frac: float = 0.3,

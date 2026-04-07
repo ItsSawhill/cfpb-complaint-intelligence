@@ -85,8 +85,15 @@ def compute_rule_risk(
     out[text_col] = out[text_col].astype("string").fillna("")
 
     # structured signals
-    disputed = out[disputed_col].astype("string").str.lower().fillna("")
-    timely = out[timely_col].astype("string").str.lower().fillna("")
+    if disputed_col in out.columns:
+        disputed = out[disputed_col].astype("string").str.lower().fillna("")
+    else:
+        disputed = pd.Series("", index=out.index, dtype="string")
+
+    if timely_col in out.columns:
+        timely = out[timely_col].astype("string").str.lower().fillna("")
+    else:
+        timely = pd.Series("", index=out.index, dtype="string")
 
     disputed_flag = disputed.eq("yes")
     untimely_flag = timely.eq("no")
